@@ -14,10 +14,10 @@ Copy the generated link and visit it to join the bot to your server.
 
 <h3>Configure the bot</h3>
 Create a file named `chooserbot.ini` and fill it out
-````
+```
 [Auth]
 Token=<My token from Bot => Token>
-````
+```
 
 <h2>Commands</h2>
 * `$setuserchannel <ChannelID>` - sets the channel where public messages will be posted
