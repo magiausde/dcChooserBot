@@ -101,6 +101,11 @@ async def new(context):
         if userchannel:
             reference_new = await userchannel.send('Okay everyone! React with thumbs up if you would like to be added!')
             await reference_new.add_reaction('👍')
+
+            # reset treasure if wanted
+            if RESET_TREASURE:
+                set_runtime_data(context.guild.id, 'treasure', None)
+                await context.send("_Cleared the treasure. Don't forget to set a new one._")
         else:
             await context.send("Channel for user messages not set yet. Will not continue! RTFM ;)")
 
@@ -129,62 +134,70 @@ async def setuserchannel(context, arg):
 async def choose(context, arg):
     if context.author.guild_permissions.administrator:
         print('Choosing demanded!')
-        if not arg:
-            await context.send("Okay I would choose, but I don't know **how many** to choose. Try again!")
+
+        treasure = get_runtime_data(context.guild.id, 'treasure')
+        if REQUIRE_TREASURE and (not treasure):
+            await context.send("I will not choose! The required treasure is not set! Do this first.")
         else:
-            if type(reference_new) == discord.message.Message:
-                cached_reference_new = discord.utils.get(bot.cached_messages, id=reference_new.id)
-                reference_reactions = cached_reference_new.reactions
-                for reaction in reference_reactions:
-                    print(reaction.emoji)  # get the real msg tho :P
-                    print(reaction.message)
-                    if reaction.emoji == '👍':
-                        thumbsup_users = [user async for user in reaction.users()]
-                        thumbsup_users.remove(bot.user)
-
-                        lobby_users_amount = len(thumbsup_users)
-                        if lobby_users_amount > 0:
-                            print(str(lobby_users_amount) + ' users in lobby: ' + ", ".join(
-                                [user.name for user in thumbsup_users]))
-
-                            try:
-                                arg_int = int(arg)
-
-                                if arg_int > 0:
-                                    chosen = get_chosen_unweighted(thumbsup_users, arg_int)
-                                    userchannel = get_runtime_data(context.guild.id, 'userchannel')
-                                    await userchannel.send(
-                                        "**I choose you:**\n- " + "\n- ".join([user.name for user in chosen]))
-
-                                    treasure = get_runtime_data(context.guild.id, 'treasure')
-                                    for user in chosen:
-                                        msg = "**Congrats! You were chosen!**"
-
-                                        if treasure:
-                                            msg += '\n**Your treasure:** ' + treasure
-
-                                        await user.send(msg)
-
-                                else:
-                                    print("! Argument out of allowed range: " + arg)
-                                    await context.send(
-                                        "Hey silly! I cannot choose from " + arg + " user(s). **Try again, please!**")
-                            except ValueError:
-                                traceback.print_exc()
-                                print("! Invalid argument - ValueError: " + arg)
-                                await context.send("This is not something I can work with. Try again!")
-                        else:
-                            await context.send("Whoops! No one was in the lobby! I cannot choose from 0 users!")
-
-                        break
+            if not arg:
+                await context.send("Okay I would choose, but I don't know **how many** to choose. Try again!")
             else:
-                await context.send(
-                    "Hey silly! You can't choose if you didn't even start yet! => try the `new` command!")
+                if type(reference_new) == discord.message.Message:
+                    cached_reference_new = discord.utils.get(bot.cached_messages, id=reference_new.id)
+                    reference_reactions = cached_reference_new.reactions
+                    for reaction in reference_reactions:
+                        print(reaction.emoji)  # get the real msg tho :P
+                        print(reaction.message)
+                        if reaction.emoji == '👍':
+                            thumbsup_users = [user async for user in reaction.users()]
+                            thumbsup_users.remove(bot.user)
+
+                            lobby_users_amount = len(thumbsup_users)
+                            if lobby_users_amount > 0:
+                                print(str(lobby_users_amount) + ' users in lobby: ' + ", ".join(
+                                    [user.name for user in thumbsup_users]))
+
+                                try:
+                                    arg_int = int(arg)
+
+                                    if arg_int > 0:
+                                        chosen = get_chosen_unweighted(thumbsup_users, arg_int)
+                                        userchannel = get_runtime_data(context.guild.id, 'userchannel')
+                                        await userchannel.send(
+                                            "**I choose you:**\n- " + "\n- ".join([user.name for user in chosen]))
+
+                                        for user in chosen:
+                                            msg = "**Congrats! You were chosen!**"
+
+                                            if treasure:
+                                                msg += '\n**Your treasure:** ' + treasure
+
+                                            await user.send(msg)
+
+                                    else:
+                                        print("! Argument out of allowed range: " + arg)
+                                        await context.send(
+                                            "Hey silly! I cannot choose from " + arg + " user(s). **Try again, please!**")
+                                except ValueError:
+                                    traceback.print_exc()
+                                    print("! Invalid argument - ValueError: " + arg)
+                                    await context.send("This is not something I can work with. Try again!")
+                            else:
+                                await context.send("Whoops! No one was in the lobby! I cannot choose from 0 users!")
+
+                            break
+                else:
+                    await context.send(
+                        "Hey silly! You can't choose if you didn't even start yet! => try the `new` command!")
 
 
 # Get the config
 cfg_main = configparser.ConfigParser()
 cfg_main.read('chooserbot.ini')
-myToken = cfg_main['Auth']['Token']
 
-bot.run(myToken)
+MY_TOKEN = cfg_main['Auth']['Token']
+
+RESET_TREASURE = cfg_main['Global']['ResetTreasureEachRound']
+REQUIRE_TREASURE = cfg_main['Global']['TreasureRequiredForChoosing']
+
+bot.run(MY_TOKEN)
