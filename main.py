@@ -175,8 +175,8 @@ async def choose(context, arg):
                                         await reference_new.delete()
 
                                         await userchannel.send(
-                                            "Alright... So who's it gonna be?\n**I choose you:**\n- " + "\n- ".join(
-                                                [user.name for user in chosen]))
+                                            "Alright... So who's it gonna be?\n**I choose you:**\n- <@" + "\n- <@".join(
+                                                [str(user.id) + ">" for user in chosen]))
 
                                         for user in chosen:
                                             msg = "**Congrats! You were chosen!**"
@@ -184,7 +184,11 @@ async def choose(context, arg):
                                             if treasure:
                                                 msg += '\n**Your treasure:** ' + treasure
 
-                                            await user.send(msg)
+                                            try:
+                                                await user.send(msg)
+                                            except discord.errors.Forbidden:
+                                                await context.send("Oh no! <@" + str(
+                                                    user.id) + "> was chosen, but does not allow DMs from me. Help!")
 
                                     else:
                                         print("! Argument out of allowed range: " + arg)
