@@ -170,8 +170,13 @@ async def choose(context, arg):
                                     if arg_int > 0:
                                         chosen = get_chosen_unweighted(thumbsup_users, arg_int)
                                         userchannel = get_runtime_data(context.guild.id, 'userchannel')
+
+                                        # delete the encouraging message
+                                        await reference_new.delete()
+
                                         await userchannel.send(
-                                            "**I choose you:**\n- " + "\n- ".join([user.name for user in chosen]))
+                                            "Alright... So who's it gonna be?\n**I choose you:**\n- " + "\n- ".join(
+                                                [user.name for user in chosen]))
 
                                         for user in chosen:
                                             msg = "**Congrats! You were chosen!**"
