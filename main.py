@@ -23,14 +23,21 @@ runtime_data = {}
 def save_runtime_data():
     global runtime_data
 
+    original_channels = {}
+
     # workaround for pickle that cannot save weakref objects (channel object)
     for server in runtime_data:
         for attrib in runtime_data[server]:
             if attrib == 'userchannel':
+                original_channels[server] = runtime_data[server][attrib]
                 runtime_data[server][attrib] = runtime_data[server][attrib].id
 
     with open('runtimedata.pkl', 'wb+') as f:
         pickle.dump(runtime_data, f, pickle.HIGHEST_PROTOCOL)
+
+    # restore the real channels
+    for server in original_channels:
+        runtime_data[server]['userchannel'] = original_channels[server]
 
 
 async def load_runtime_data():
