@@ -1,5 +1,3 @@
-# This example requires the 'message_content' intent.
-import asyncio
 import os
 import pickle
 import traceback
@@ -48,6 +46,7 @@ async def load_runtime_data():
                 channel = await bot.fetch_channel(runtime_data[server][attrib])
                 runtime_data[server][attrib] = channel
 
+
 def set_runtime_data(serverid, key, value):
     if serverid not in runtime_data:
         runtime_data[serverid] = {}
@@ -55,12 +54,14 @@ def set_runtime_data(serverid, key, value):
     runtime_data[serverid][key] = value
     save_runtime_data()
 
+
 def get_runtime_data(serverid, key):
     if serverid in runtime_data:
         if key in runtime_data[serverid]:
             return runtime_data[serverid][key]
 
     return None
+
 
 def get_chosen_unweighted(choose_list, amount):
     chosen = []
@@ -76,7 +77,7 @@ def get_chosen_unweighted(choose_list, amount):
         if upper_index_boundary > 0:
             random_index = randint(0, upper_index_boundary)
 
-        print("RI " + str(random_index) + ", UIP " + str(upper_index_boundary))
+        # print("RI " + str(random_index) + ", UIP " + str(upper_index_boundary))
 
         chosen.append(choose_list[random_index])
         choose_list.remove(choose_list[random_index])
@@ -110,6 +111,7 @@ async def settreasure(context, arg):
         set_runtime_data(context.guild.id, 'treasure', arg)
         await context.send("Okay! Treasure set to: " + arg)
 
+
 @bot.command()
 async def setuserchannel(context, arg):
     if context.author.guild_permissions.administrator:
@@ -121,6 +123,7 @@ async def setuserchannel(context, arg):
         except:
             traceback.print_exc()
             await context.send("Whoops! Something went wrong while setting a new channel for user messages!")
+
 
 @bot.command()
 async def choose(context, arg):
@@ -141,7 +144,8 @@ async def choose(context, arg):
 
                         lobby_users_amount = len(thumbsup_users)
                         if lobby_users_amount > 0:
-                            print(str(lobby_users_amount) + ' users in lobby: ' + ", ".join([user.name for user in thumbsup_users]))
+                            print(str(lobby_users_amount) + ' users in lobby: ' + ", ".join(
+                                [user.name for user in thumbsup_users]))
 
                             try:
                                 arg_int = int(arg)
@@ -149,7 +153,8 @@ async def choose(context, arg):
                                 if arg_int > 0:
                                     chosen = get_chosen_unweighted(thumbsup_users, arg_int)
                                     userchannel = get_runtime_data(context.guild.id, 'userchannel')
-                                    await userchannel.send("**I choose you:**\n- " + "\n- ".join([user.name for user in chosen]))
+                                    await userchannel.send(
+                                        "**I choose you:**\n- " + "\n- ".join([user.name for user in chosen]))
 
                                     treasure = get_runtime_data(context.guild.id, 'treasure')
                                     for user in chosen:
@@ -162,7 +167,8 @@ async def choose(context, arg):
 
                                 else:
                                     print("! Argument out of allowed range: " + arg)
-                                    await context.send("Hey silly! I cannot choose from " + arg + " user(s). **Try again, please!**")
+                                    await context.send(
+                                        "Hey silly! I cannot choose from " + arg + " user(s). **Try again, please!**")
                             except ValueError:
                                 traceback.print_exc()
                                 print("! Invalid argument - ValueError: " + arg)
@@ -172,13 +178,8 @@ async def choose(context, arg):
 
                         break
             else:
-                await context.send("Hey silly! You can't choose if you didn't even start yet! => try the `new` command!")
-
-# async def on_message(self, message):
-#     print(f'Message from {message.author}: {message.content}')
-#
-#     if message.author.id != self.user.id:
-#         await message.author.send("PONG " + message.content)
+                await context.send(
+                    "Hey silly! You can't choose if you didn't even start yet! => try the `new` command!")
 
 
 # Get the config
