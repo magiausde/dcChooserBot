@@ -197,7 +197,7 @@ cfg_main.read('chooserbot.ini')
 
 MY_TOKEN = cfg_main['Auth']['Token']
 
-RESET_TREASURE = cfg_main['Global']['ResetTreasureEachRound']
-REQUIRE_TREASURE = cfg_main['Global']['TreasureRequiredForChoosing']
+RESET_TREASURE = cfg_main.getboolean('Global', 'ResetTreasureEachRound')
+REQUIRE_TREASURE = cfg_main.getboolean('Global', 'TreasureRequiredForChoosing')
 
 bot.run(MY_TOKEN)
