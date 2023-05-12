@@ -14,7 +14,8 @@ intents = discord.Intents.default()
 intents.guild_messages = True
 
 bot = commands.Bot(command_prefix=commands.when_mentioned_or("$"),
-                   description='Chooser Bot', status=discord.Status.dnd, intents=intents, activity=discord.Game(name="GarticPhone"))
+                   description='Chooser Bot', status=discord.Status.dnd, intents=intents,
+                   activity=discord.Game(name="preferring people since 2023"))
 
 reference_new = -1
 
