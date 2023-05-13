@@ -24,13 +24,27 @@ def save_runtime_data():
     global runtime_data
 
     original_channels = {}
+    original_roles = {}
+
+    # first of all, remove all empty/none attributes
+    for server in runtime_data:
+        for attrib in list(runtime_data[server]):
+            if not runtime_data[server][attrib]:
+                print("Cleanup - removed: " + str(server) + " - " + str(attrib))
+                runtime_data[server].pop(attrib)
 
     # workaround for pickle that cannot save weakref objects (channel object)
     for server in runtime_data:
         for attrib in runtime_data[server]:
+            value = runtime_data[server][attrib]
+            print('runtime_data for ' + str(server) + ', ' + attrib + ': ' + str(value))
+
             if attrib == 'userchannel':
-                original_channels[server] = runtime_data[server][attrib]
-                runtime_data[server][attrib] = runtime_data[server][attrib].id
+                original_channels[server] = value
+                runtime_data[server][attrib] = value.id
+            if attrib == 'modrole':
+                original_roles[server] = value
+                runtime_data[server][attrib] = value.id
 
     with open('runtimedata.pkl', 'wb+') as f:
         pickle.dump(runtime_data, f, pickle.HIGHEST_PROTOCOL)
@@ -38,6 +52,10 @@ def save_runtime_data():
     # restore the real channels
     for server in original_channels:
         runtime_data[server]['userchannel'] = original_channels[server]
+
+    # restore the real roles
+    for server in original_roles:
+        runtime_data[server]['modrole'] = original_roles[server]
 
 
 async def load_runtime_data():
@@ -52,6 +70,10 @@ async def load_runtime_data():
             if attrib == 'userchannel':
                 channel = await bot.fetch_channel(runtime_data[server][attrib])
                 runtime_data[server][attrib] = channel
+            if attrib == 'modrole':
+                serverobject = bot.get_guild(server)
+                modrole = discord.utils.get(serverobject.roles, id=runtime_data[server][attrib])
+                runtime_data[server][attrib] = modrole
 
 
 def set_runtime_data(serverid, key, value):
@@ -68,6 +90,11 @@ def get_runtime_data(serverid, key):
             return runtime_data[serverid][key]
 
     return None
+
+
+def is_management_permitted(context):
+    return context.author.guild_permissions.administrator or (
+            get_runtime_data(context.guild.id, 'modrole') in context.guild.roles)
 
 
 def get_chosen_unweighted(choose_list, amount):
@@ -100,7 +127,7 @@ async def on_ready():
 
 @bot.command()
 async def new(context):
-    if context.author.guild_permissions.administrator:
+    if is_management_permitted(context):
         global reference_new
         print('New lobby demanded!')
 
@@ -119,14 +146,14 @@ async def new(context):
 
 @bot.command()
 async def settreasure(context, arg):
-    if context.author.guild_permissions.administrator:
+    if is_management_permitted(context):
         set_runtime_data(context.guild.id, 'treasure', arg)
         await context.send("Okay! Treasure set to: " + arg)
 
 
 @bot.command()
 async def setuserchannel(context, arg):
-    if context.author.guild_permissions.administrator:
+    if is_management_permitted(context):
         try:
             channel = await bot.fetch_channel(arg)
             set_runtime_data(context.guild.id, 'userchannel', channel)
@@ -138,8 +165,27 @@ async def setuserchannel(context, arg):
 
 
 @bot.command()
-async def choose(context, arg):
+async def setmodrole(context, arg):
+    # this can definitely only be done by an administrator
     if context.author.guild_permissions.administrator:
+        modrole = discord.utils.get(context.guild.roles, id=int(arg))
+        set_runtime_data(context.guild.id, 'modrole', modrole)
+        await getmodrole(context)
+
+
+@bot.command()
+async def getmodrole(context):
+    if is_management_permitted(context):
+        modrole = get_runtime_data(context.guild.id, 'modrole')
+        if modrole:
+            await context.send("Current modrole: " + modrole.name + "\nAdministrators are always able to use me, too.")
+        else:
+            await context.send("Currently no modrole is set.\nAdministrators are always able to use me.")
+
+
+@bot.command()
+async def choose(context, arg):
+    if is_management_permitted(context):
         print('Choosing demanded!')
 
         treasure = get_runtime_data(context.guild.id, 'treasure')
