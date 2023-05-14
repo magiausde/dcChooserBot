@@ -12,22 +12,50 @@ from discord.ext import commands
 logger = logging.getLogger('dcChooserBot_main')
 logger.setLevel(logging.DEBUG)
 ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
+ch.setLevel(logging.CRITICAL)
 logformat = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 ch.setFormatter(logformat)
 logger.addHandler(ch)
+
+# Get the config
+logger.debug("Loading config")
+cfg_main = configparser.ConfigParser()
+cfg_main.read('chooserbot.ini')
+
+LOG_LEVEL = cfg_main["Logging"]["LogLevel"]
+if LOG_LEVEL == "Critical":
+    ch.setLevel(logging.CRITICAL)
+elif LOG_LEVEL == "Error":
+    ch.setLevel(logging.ERROR)
+elif LOG_LEVEL == "Warning":
+    ch.setLevel(logging.WARNING)
+elif LOG_LEVEL == "Info":
+    ch.setLevel(logging.INFO)
+elif LOG_LEVEL == "Debug":
+    ch.setLevel(logging.DEBUG)
+
+MY_TOKEN = cfg_main['Auth']['Token']
+logger.debug("MY_TOKEN: " + MY_TOKEN)
+
+RESET_TREASURE = cfg_main.getboolean('Global', 'ResetTreasureEachRound')
+logger.debug("RESET_TREASURE: " + str(RESET_TREASURE))
+REQUIRE_TREASURE = cfg_main.getboolean('Global', 'TreasureRequiredForChoosing')
+logger.debug("REQUIRE_TREASURE: " + str(REQUIRE_TREASURE))
+
+logger.debug("Starting bot")
+
 
 logger.debug("Preparing bot object")
 intents = discord.Intents.default()
 intents.guild_messages = True
 
-bot = commands.Bot(command_prefix=commands.when_mentioned_or("$"),
-                   description='Chooser Bot', status=discord.Status.dnd, intents=intents,
-                   activity=discord.Game(name="preferring people since 2023"))
-
 reference_new = -1
 
 runtime_data = {}
+
+bot = commands.Bot(command_prefix=commands.when_mentioned_or("$"),
+                   description='Chooser Bot', status=discord.Status.dnd, intents=intents,
+                   activity=discord.Game(name="preferring people since 2023"))
 
 
 def save_runtime_data():
@@ -109,11 +137,15 @@ def get_runtime_data(serverid, key):
 
 
 def get_context_summary(context):
-    return "[" + str(context.author) + " (" + str(context.author.id) + ")@" + context.guild.name + "/" + context.channel.name + "]"
+    return "[" + printuser(context.author) + "@" + context.guild.name + "/" + context.channel.name + "]"
+
+
+def printuser(user):
+    return str(user) + " (" + str(user.id) + ")"
 
 
 def is_management_permitted(context):
-    logger.debug("Checking management permissions for user " + str(context.author.id) + ", " + str(context.author))
+    logger.debug("Checking management permissions for user " + printuser(context.author))
     imp = context.author.guild_permissions.administrator or (
             get_runtime_data(context.guild.id, 'modrole') in context.guild.roles)
     logger.debug("Is permitted? " + str(imp))
@@ -139,7 +171,7 @@ def get_chosen_unweighted(choose_list, amount):
             random_index = randint(0, upper_index_boundary)
 
         logger.debug("RandomIndex " + str(random_index) + ", UpperIndexBoundary " + str(upper_index_boundary))
-        logger.debug("This user was chosen: " + str(choose_list[random_index]))
+        logger.debug("This user was chosen: " + printuser((choose_list[random_index])))
 
         chosen.append(choose_list[random_index])
         choose_list.remove(choose_list[random_index])
@@ -251,7 +283,7 @@ async def choose(context, arg):
                             lobby_users_amount = len(thumbsup_users)
                             if lobby_users_amount > 0:
                                 logger.info(str(lobby_users_amount) + ' user(s) in lobby: ' + ", ".join(
-                                    [str(user) for user in thumbsup_users]))
+                                    [printuser(user) for user in thumbsup_users]))
 
                                 try:
                                     arg_int = int(arg)
@@ -280,7 +312,7 @@ async def choose(context, arg):
                                                 await user.send(msg)
                                             except discord.errors.Forbidden:
                                                 logger.warning(
-                                                    "User does not allow DMs, informing context - " + str(user))
+                                                    "User does not allow DMs, informing context - " + printuser(user))
                                                 await context.send("Oh no! <@" + str(
                                                     user.id) + "> was chosen, but does not allow DMs from me. Help!")
 
@@ -303,18 +335,4 @@ async def choose(context, arg):
                         "Hey silly! You can't choose if you didn't even start yet! => try the `new` command!")
 
 
-# Get the config
-logger.debug("Loading config")
-cfg_main = configparser.ConfigParser()
-cfg_main.read('chooserbot.ini')
-
-MY_TOKEN = cfg_main['Auth']['Token']
-logger.debug("MY_TOKEN: " + MY_TOKEN)
-
-RESET_TREASURE = cfg_main.getboolean('Global', 'ResetTreasureEachRound')
-logger.debug("RESET_TREASURE: " + str(RESET_TREASURE))
-REQUIRE_TREASURE = cfg_main.getboolean('Global', 'TreasureRequiredForChoosing')
-logger.debug("REQUIRE_TREASURE: " + str(REQUIRE_TREASURE))
-
-logger.debug("Starting bot")
 bot.run(MY_TOKEN)
