@@ -8,6 +8,9 @@ import secrets
 
 from discord.ext import commands
 
+# version info
+VERSION_INFO = '2023-05-15a'
+
 # setup logging
 logger = logging.getLogger('dcChooserBot_main')
 logger.setLevel(logging.DEBUG)
@@ -492,6 +495,13 @@ async def choose(context, arg):
                     logger.info("No choosing active for server, informing user")
                     await context.send(
                         "Hey silly! You can't choose if you didn't even start yet! => try the `new` command!")
+
+
+@bot.command()
+async def version(context):
+    await context.send(
+        "**This is dcChooserBot, version " + VERSION_INFO +
+        "**\nI am an open source project, initiated by magiausde! Find me at https://github.com/magiausde/dcChooserBot")
 
 
 bot.run(MY_TOKEN)
