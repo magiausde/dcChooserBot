@@ -5,14 +5,16 @@
 # https://github.com/magiausde/dcChooserBot #
 #############################################
 
+# Generic imports
+import configparser
+import logging
 import os
 import pickle
-import traceback
-import logging
-import discord
-import configparser
 import secrets
+import traceback
 
+# Specific imports
+import discord
 from discord.ext import commands
 
 # version info
@@ -32,6 +34,7 @@ logger.debug("Loading config")
 cfg_main = configparser.ConfigParser()
 cfg_main.read('chooserbot.ini')
 
+# get the desired loglevel from config and set it
 LOG_LEVEL = cfg_main["Logging"]["LogLevel"]
 if LOG_LEVEL == "Critical":
     ch.setLevel(logging.CRITICAL)
@@ -44,13 +47,20 @@ elif LOG_LEVEL == "Info":
 elif LOG_LEVEL == "Debug":
     ch.setLevel(logging.DEBUG)
 
+# load the bot token from config
 MY_TOKEN = cfg_main['Auth']['Token']
 logger.debug("MY_TOKEN: " + MY_TOKEN)
 
+# load global options from config
+# Reset treasure after each round?
 RESET_TREASURE = cfg_main.getboolean('Global', 'ResetTreasureEachRound')
 logger.debug("RESET_TREASURE: " + str(RESET_TREASURE))
+
+# Require treasure to use choose-command?
 REQUIRE_TREASURE = cfg_main.getboolean('Global', 'TreasureRequiredForChoosing')
 logger.debug("REQUIRE_TREASURE: " + str(REQUIRE_TREASURE))
+
+# Should multiple benefits be applied?
 MULTIPLE_BENEFITS = cfg_main.getboolean('Global', 'MultipleBenefits')
 logger.debug("MULTIPLE_BENEFITS: " + str(MULTIPLE_BENEFITS))
 
@@ -58,18 +68,27 @@ logger.debug("Starting bot")
 
 logger.debug("Preparing bot object")
 intents = discord.Intents.default()
+# we need access to guild messages, otherwise the bot won't get the message content
 intents.guild_messages = True
 
+# reference_new will contain the reference to a "new/react" message
 reference_new = -1
 
+# runtime_data stores all the settings and will be loaded from the filesystem (if available)
 runtime_data = {}
 
+# Setup of the bot
 bot = commands.Bot(command_prefix=commands.when_mentioned_or("$"),
                    description='Chooser Bot', status=discord.Status.dnd, intents=intents,
                    activity=discord.Game(name="preferring people since 2023"))
 
 
 def save_runtime_data():
+    """
+    Saves the runtime_data variable to the filesystem.
+    Usually executed after runtime_data was updated.
+    :return: nothing
+    """
     global runtime_data
     logger.debug("Saving runtime data")
 
@@ -109,6 +128,11 @@ def save_runtime_data():
 
 
 async def load_runtime_data():
+    """
+    Loads saved settings from the filesystem into runtime_data.
+    Usually only executed on startup.
+    :return: nothing
+    """
     global runtime_data
     logger.debug("Loading runtime data")
 
@@ -129,6 +153,13 @@ async def load_runtime_data():
 
 
 def set_runtime_data(serverid, key, value):
+    """
+    Sets and saves a new value for runtime_data.
+    :param serverid: The server's id this key and value belongs to
+    :param key: The key of the value
+    :param value: Value to be saved into runtime_data
+    :return: nothing
+    """
     logger.debug("SET runtime data - " + str(serverid) + ", " + key + ": " + str(value))
     if serverid not in runtime_data:
         runtime_data[serverid] = {}
@@ -138,6 +169,12 @@ def set_runtime_data(serverid, key, value):
 
 
 def get_runtime_data(serverid, key):
+    """
+    Returns a value from runtime_data
+    :param serverid: The server's id the key belongs to
+    :param key: Key that states which data to retrieve
+    :return: Stored value or None if nothing stored
+    """
     logger.debug("GET runtime data - " + str(serverid) + ", " + key)
     if serverid in runtime_data:
         if key in runtime_data[serverid]:
@@ -148,6 +185,13 @@ def get_runtime_data(serverid, key):
 
 
 def set_rolebenefit(serverid, roleid, benefit):
+    """
+    Internal method for saving a role's benefit value to runtime_data
+    :param serverid: Server's id the benefit belongs to
+    :param roleid: The role id where the benefit was set for
+    :param benefit: Amount of benefit to store for the role
+    :return: nothing
+    """
     logger.debug("SET role-benefit - " + str(serverid) + ", " + str(roleid) + ": " + str(benefit))
     if serverid not in runtime_data:
         runtime_data[serverid] = {}
@@ -165,14 +209,32 @@ def set_rolebenefit(serverid, roleid, benefit):
 
 
 def get_context_summary(context):
+    """
+    Provides a context summary, mainly used by logging.
+    Summary consists of the user, guild/server name and channel name
+    :param context: Context object for which to get the summary for
+    :return: String with summary of context
+    """
     return "[" + printuser(context.author) + "@" + context.guild.name + "/" + context.channel.name + "]"
 
 
 def printuser(user):
+    """
+    Returns detailed identification of a User-object.
+    This includes the username, discriminator and also the user-id
+    :param user: User-object to get the identification for
+    :return: String with detailed identification of User-object.
+    """
     return str(user) + " (" + str(user.id) + ")"
 
 
 def is_management_permitted(context):
+    """
+    Checks if a user (from context) is allowed to perform management-actions.
+    This is True if the user is a server administrator or modrole member.
+    :param context: Context to check
+    :return: if the user (from context) is allowed to perform management-actions
+    """
     logger.debug("Checking management permissions for user " + printuser(context.author))
     imp = context.author.guild_permissions.administrator or (
             get_runtime_data(context.guild.id, 'modrole') in context.guild.roles)
@@ -181,6 +243,11 @@ def is_management_permitted(context):
 
 
 def log_probabilities(users_list):
+    """
+    Debug-method which calculates each user's probability of being chosen.
+    :param users_list: List of User-objects to count/calculate
+    :return: nothing
+    """
     logger.debug("Logging the probabilities for this turn:")
 
     counts = {}
@@ -197,6 +264,12 @@ def log_probabilities(users_list):
 
 
 def get_maximum_benefit(member, benefit_roles):
+    """
+    Checks all roles a user has and returns the maximum benefit found.
+    :param member: Which member to check for
+    :param benefit_roles: List of roles with benefits set (get them from runtime_data!)
+    :return: The maximum benefit found for the given user
+    """
     logger.debug("Checking the maximum single benefit for " + printuser(member))
 
     temp_max = 0
@@ -213,6 +286,13 @@ def get_maximum_benefit(member, benefit_roles):
 
 
 async def get_chosen_weighted(choose_list, amount, server):
+    """
+    Chooses the people and also applies benefits (if available).
+    :param choose_list: List of users to choose from
+    :param amount: How many people to choose
+    :param server: The server where choosing takes place
+    :return: List of users that were chosen (unique users)
+    """
     logger.debug("Choosing weighted")
     chosen = []
 
@@ -287,6 +367,11 @@ async def get_chosen_weighted(choose_list, amount, server):
 
 @bot.event
 async def on_ready():
+    """
+    Called when the Discord bot is ready.
+    Will load saved runtime_data (if available).
+    :return:
+    """
     logger.info(f'Logged on as {bot.user}!')
     await load_runtime_data()
     logger.debug("Ready! Startup completed.")
@@ -294,6 +379,12 @@ async def on_ready():
 
 @bot.command()
 async def new(context):
+    """
+    Bot command to start a new choosing-round.
+    Posts a message to react to the public channel
+    :param context: Command context
+    :return: nothing
+    """
     if is_management_permitted(context):
         global reference_new
         logger.info('New lobby demanded ' + get_context_summary(context))
@@ -316,6 +407,12 @@ async def new(context):
 
 @bot.command()
 async def settreasure(context, arg):
+    """
+    Bot command to set the treasure on a server.
+    :param context: Command context
+    :param arg: Treasure to set
+    :return: nothing
+    """
     if is_management_permitted(context):
         logger.info('Setting new treasure ' + get_context_summary(context))
         logger.debug("Argument: " + arg)
@@ -325,6 +422,12 @@ async def settreasure(context, arg):
 
 @bot.command()
 async def setuserchannel(context, arg):
+    """
+    Bot command to set the public/user channel on a server.
+    :param context: Command context
+    :param arg: Channel id to set
+    :return: nothing
+    """
     if is_management_permitted(context):
         logger.info('Setting new userchannel ' + get_context_summary(context))
         try:
@@ -340,6 +443,12 @@ async def setuserchannel(context, arg):
 
 @bot.command()
 async def setmodrole(context, arg):
+    """
+    Bot command to set the modrole on a server.
+    :param context: Command context
+    :param arg: Modrole id to set
+    :return: nothing
+    """
     # this can definitely only be done by an administrator
     if context.author.guild_permissions.administrator:
         logger.info('Setting new modrole ' + get_context_summary(context))
@@ -350,6 +459,12 @@ async def setmodrole(context, arg):
 
 @bot.command()
 async def getmodrole(context):
+    """
+    Bot command to get the modrole set on a server.
+    Result will be sent to the context (message will be posted).
+    :param context: Command context
+    :return: nothing
+    """
     if is_management_permitted(context):
         logger.debug('Modrole requested ' + get_context_summary(context))
         modrole = get_runtime_data(context.guild.id, 'modrole')
@@ -363,6 +478,13 @@ async def getmodrole(context):
 
 @bot.command()
 async def setbenefit(context, raw_roleid, raw_benefit):
+    """
+    Bot command to set a benefit for a role on a server.
+    :param context: Command context
+    :param raw_roleid: Role id where the benefit will be apllied to
+    :param raw_benefit: The benefit value
+    :return: nothing
+    """
     if is_management_permitted(context):
         logger.debug('User setting benefit ' + get_context_summary(context))
 
@@ -397,6 +519,12 @@ async def setbenefit(context, raw_roleid, raw_benefit):
 
 @bot.command()
 async def listbenefits(context):
+    """
+    Bot command to get the benefits set on a server.
+    Result will be sent to the context (message will be posted).
+    :param context: Command context
+    :return: nothing
+    """
     if is_management_permitted(context):
         benefitroles = get_runtime_data(context.guild.id, 'rolebenefits')
 
@@ -413,6 +541,14 @@ async def listbenefits(context):
 
 @bot.command()
 async def choose(context, arg):
+    """
+    Bot command to start the choosing.
+    Takes care of all relevant choosing parts, like getting a list of chosen users and also informing them.
+    Also checks for some requirements.
+    :param context: Command context
+    :param arg: How many to choose
+    :return: nothing
+    """
     if is_management_permitted(context):
         logger.info('Choosing demanded ' + get_context_summary(context))
 
@@ -506,6 +642,12 @@ async def choose(context, arg):
 
 @bot.command()
 async def version(context):
+    """
+    Bot command to get the bot version.
+    Result will be sent to the context (message will be posted).
+    :param context: Command context
+    :return: nothing
+    """
     await context.send(
         "**This is dcChooserBot, version " + VERSION_INFO +
         "**\nI am an open source project, initiated by magiausde! Find me at https://github.com/magiausde/dcChooserBot")
