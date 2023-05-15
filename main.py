@@ -1,3 +1,10 @@
+#############################################
+#              dcChooserBot                 #
+#############################################
+# An open source Discord bot for choosing   #
+# https://github.com/magiausde/dcChooserBot #
+#############################################
+
 import os
 import pickle
 import traceback
