@@ -1,10 +1,10 @@
 import os
 import pickle
 import traceback
-from random import randint
 import logging
 import discord
 import configparser
+import secrets
 
 from discord.ext import commands
 
@@ -41,9 +41,10 @@ RESET_TREASURE = cfg_main.getboolean('Global', 'ResetTreasureEachRound')
 logger.debug("RESET_TREASURE: " + str(RESET_TREASURE))
 REQUIRE_TREASURE = cfg_main.getboolean('Global', 'TreasureRequiredForChoosing')
 logger.debug("REQUIRE_TREASURE: " + str(REQUIRE_TREASURE))
+MULTIPLE_BENEFITS = cfg_main.getboolean('Global', 'MultipleBenefits')
+logger.debug("MULTIPLE_BENEFITS: " + str(MULTIPLE_BENEFITS))
 
 logger.debug("Starting bot")
-
 
 logger.debug("Preparing bot object")
 intents = discord.Intents.default()
@@ -136,6 +137,23 @@ def get_runtime_data(serverid, key):
     return None
 
 
+def set_rolebenefit(serverid, roleid, benefit):
+    logger.debug("SET role-benefit - " + str(serverid) + ", " + str(roleid) + ": " + str(benefit))
+    if serverid not in runtime_data:
+        runtime_data[serverid] = {}
+
+    if benefit > 0:
+        if 'rolebenefits' not in runtime_data[serverid]:
+            logger.debug('rolebenefits not yet in runtime_data for server, creating dict')
+            runtime_data[serverid]['rolebenefits'] = {}
+
+        runtime_data[serverid]['rolebenefits'][roleid] = benefit
+    else:
+        runtime_data[serverid]['rolebenefits'].pop(roleid)
+
+    save_runtime_data()
+
+
 def get_context_summary(context):
     return "[" + printuser(context.author) + "@" + context.guild.name + "/" + context.channel.name + "]"
 
@@ -152,8 +170,40 @@ def is_management_permitted(context):
     return imp
 
 
-def get_chosen_unweighted(choose_list, amount):
-    logger.debug("Choosing unweighted")
+def log_probabilities(users_list):
+    logger.debug("Logging the probabilities for this turn:")
+
+    counts = {}
+
+    for user in users_list:
+        if user.id in counts:
+            counts[user.id] += 1
+        else:
+            counts[user.id] = 1
+
+    for entry in counts:
+        logger.debug(str(round(counts[entry] / len(users_list) * 100, 4)) + "% " + str(counts[entry]) + "/" + str(
+            len(users_list)) + ": " + str(entry))
+
+
+def get_maximum_benefit(member, benefit_roles):
+    logger.debug("Checking the maximum single benefit for " + printuser(member))
+
+    temp_max = 0
+    for member_role in member.roles:
+        if member_role.id in benefit_roles:
+            benefit = benefit_roles[member_role.id]
+            logger.debug(printuser(member) + " role-benefit for " + str(member_role) + ": " + str(benefit))
+
+            if benefit > temp_max:
+                temp_max = benefit
+
+    logger.debug("Maximum single benefit is " + str(temp_max))
+    return temp_max
+
+
+async def get_chosen_weighted(choose_list, amount, server):
+    logger.debug("Choosing weighted")
     chosen = []
 
     if amount > len(choose_list):
@@ -162,19 +212,64 @@ def get_chosen_unweighted(choose_list, amount):
     else:
         logger.debug(str(amount) + " demanded and " + str(len(choose_list)) + " reacted.")
 
+    # go through all users, go through all of their server roles and apply role-benefit
+    logger.debug("choose_list before: " + ", ".join([printuser(user) for user in choose_list]))
+    logger.debug("Applying benefits to users")
+    benefit_roles = get_runtime_data(server.id, 'rolebenefits')
+
+    if benefit_roles:
+        choose_list_original = choose_list.copy()
+        for user in choose_list_original:
+            # to check the roles, we have to get the Member object, as we only have User objects
+            member = await server.fetch_member(user.id)
+            if member:
+                if MULTIPLE_BENEFITS:
+                    logger.debug("Multiple benefits will be applied")
+                    for member_role in member.roles:
+                        if member_role.id in benefit_roles:
+                            benefit = benefit_roles[member_role.id]
+                            logger.debug(
+                                printuser(user) + " role-benefit for " + str(member_role) + ": " + str(benefit))
+                            for _ in range(benefit):
+                                logger.debug("Adding user once more to choose_list")
+                                choose_list.append(user)
+                else:
+                    logger.debug("Only the highest benefit will be applied")
+                    benefit = get_maximum_benefit(member, benefit_roles)
+                    for _ in range(benefit):
+                        logger.debug("Adding user once more to choose_list")
+                        choose_list.append(user)
+            else:
+                logger.warning("User is no longer member of server, benefits not applied: " + printuser(user))
+    else:
+        logger.debug("No benefit roles set. Skipping.")
+
+    logger.debug("Applying done")
+    logger.debug("choose_list after: " + ", ".join([printuser(user) for user in choose_list]))
+
     logger.debug("Choosing starts")
     while len(chosen) < amount:
+        log_probabilities(choose_list)
+
         upper_index_boundary = len(choose_list) - 1
 
         random_index = 0
         if upper_index_boundary > 0:
-            random_index = randint(0, upper_index_boundary)
+            random_index = secrets.randbelow(upper_index_boundary + 1)
 
-        logger.debug("RandomIndex " + str(random_index) + ", UpperIndexBoundary " + str(upper_index_boundary))
-        logger.debug("This user was chosen: " + printuser((choose_list[random_index])))
+        chosen_user = choose_list[random_index]
 
-        chosen.append(choose_list[random_index])
-        choose_list.remove(choose_list[random_index])
+        logger.debug("RandomIndex " + str(random_index) + ", UpperIndexBoundary was " + str(upper_index_boundary))
+        logger.debug("This user was chosen: " + printuser(chosen_user))
+
+        chosen.append(chosen_user)
+
+        # loop through the list to remove the chosen user entirely - else he could be chosen multiple times
+        for entry in list(choose_list):
+            if entry == chosen_user:
+                choose_list.remove(chosen_user)
+                logger.debug("Removed " + printuser(chosen_user) + " from choose_list")
+
     logger.debug("Choosing ended")
 
     return chosen
@@ -257,6 +352,56 @@ async def getmodrole(context):
 
 
 @bot.command()
+async def setbenefit(context, raw_roleid, raw_benefit):
+    if is_management_permitted(context):
+        logger.debug('User setting benefit ' + get_context_summary(context))
+
+        # benefit must be greater than zero and a valid integer
+        try:
+            roleid = int(raw_roleid)
+            benefit = int(raw_benefit)
+            if (roleid > 0) and (benefit > -1):
+                # first of all check, if the role exists
+                role = context.guild.get_role(roleid)
+
+                if role:
+                    if benefit > 99:
+                        logger.warning("User set benefit > 99, informing about possible performance impact")
+                        await context.send(
+                            "**Please note that benefits over 100 are not recommended because of performance reasons!**")
+
+                    logger.debug('Everything okay, passing data to internal save method')
+                    set_rolebenefit(context.guild.id, roleid, benefit)
+                    await listbenefits(context)
+                else:
+                    logger.warning("User passed an invalid role, informing")
+                    await context.send("The role you entered does not exist on this server!")
+            else:
+                logger.warning("User passed invalid integer, informing user")
+                await context.send(
+                    "Please check you entered valid values for the role id and the benefit!")
+        except ValueError:
+            logger.warning("User passed invalid argument (ValueError), informing user")
+            await context.send("Whoops! Something went wrong. Did you pass valid numbers to me?")
+
+
+@bot.command()
+async def listbenefits(context):
+    if is_management_permitted(context):
+        benefitroles = get_runtime_data(context.guild.id, 'rolebenefits')
+
+        summary = "These are the benefits currently configured for " + str(context.guild) + ":"
+        if benefitroles:
+            for benefitroleid in benefitroles:
+                benefit_role = discord.utils.get(context.guild.roles, id=benefitroleid)
+                summary += "\n- " + str(benefit_role) + ": " + str(benefitroles[benefitroleid])
+        else:
+            summary += '\n- None configured!'
+
+        await context.send(summary)
+
+
+@bot.command()
 async def choose(context, arg):
     if is_management_permitted(context):
         logger.info('Choosing demanded ' + get_context_summary(context))
@@ -273,62 +418,76 @@ async def choose(context, arg):
                 if type(reference_new) == discord.message.Message:
                     logger.debug("Getting the up-to-date message users had to react to")
                     cached_reference_new = discord.utils.get(bot.cached_messages, id=reference_new.id)
-                    reference_reactions = cached_reference_new.reactions
-                    logger.debug("Counting reactions")
-                    for reaction in reference_reactions:
-                        if reaction.emoji == '👍':
-                            thumbsup_users = [user async for user in reaction.users()]
-                            thumbsup_users.remove(bot.user)
 
-                            lobby_users_amount = len(thumbsup_users)
-                            if lobby_users_amount > 0:
-                                logger.info(str(lobby_users_amount) + ' user(s) in lobby: ' + ", ".join(
-                                    [printuser(user) for user in thumbsup_users]))
+                    if cached_reference_new:
+                        reference_reactions = cached_reference_new.reactions
+                        logger.debug("Counting reactions")
+                        for reaction in reference_reactions:
+                            if reaction.emoji == '👍':
+                                # caution! we get User objects here, not Members!
+                                thumbsup_users = [user async for user in reaction.users()]
+                                thumbsup_users.remove(bot.user)
 
-                                try:
-                                    arg_int = int(arg)
+                                lobby_users_amount = len(thumbsup_users)
+                                if lobby_users_amount > 0:
+                                    logger.info(str(lobby_users_amount) + ' user(s) in lobby: ' + ", ".join(
+                                        [printuser(user) for user in thumbsup_users]))
 
-                                    if arg_int > 0:
-                                        chosen = get_chosen_unweighted(thumbsup_users, arg_int)
-                                        userchannel = get_runtime_data(context.guild.id, 'userchannel')
+                                    try:
+                                        arg_int = int(arg)
 
-                                        # delete the encouraging message
-                                        logger.debug("Deleting message to react to")
-                                        await reference_new.delete()
+                                        if arg_int > 0:
+                                            logger.debug("Sending info message to context")
+                                            modmsg = await context.send(
+                                                "Choosing and informing " + str(arg_int) + " user(s). Please wait...")
 
-                                        logger.debug("Informing users about the chosen ones")
-                                        await userchannel.send(
-                                            "Alright... So who's it gonna be?\n**I choose you:**\n- <@" + "\n- <@".join(
-                                                [str(user.id) + ">" for user in chosen]))
+                                            chosen = await get_chosen_weighted(thumbsup_users, arg_int, context.guild)
+                                            userchannel = get_runtime_data(context.guild.id, 'userchannel')
 
-                                        logger.debug("Sending DMs to chosen users")
-                                        for user in chosen:
-                                            msg = "**Congrats! You were chosen!**"
+                                            # delete the encouraging message
+                                            logger.debug("Deleting message to react to")
+                                            await reference_new.delete()
 
-                                            if treasure:
-                                                msg += '\n**Your treasure:** ' + treasure
+                                            logger.debug("Informing users about the chosen ones")
+                                            await userchannel.send(
+                                                "Alright... So who's it gonna be?\n**I choose you:**\n- <@" + "\n- <@".join(
+                                                    [str(user.id) + ">" for user in chosen]))
 
-                                            try:
-                                                await user.send(msg)
-                                            except discord.errors.Forbidden:
-                                                logger.warning(
-                                                    "User does not allow DMs, informing context - " + printuser(user))
-                                                await context.send("Oh no! <@" + str(
-                                                    user.id) + "> was chosen, but does not allow DMs from me. Help!")
+                                            logger.debug("Sending DMs to chosen users")
+                                            for user in chosen:
+                                                msg = "**Congrats! You were chosen!**"
 
-                                    else:
-                                        logger.warning("Informing user as argument is out of allowed range: " + arg)
-                                        await context.send(
-                                            "Hey silly! I cannot choose from " + arg + " user(s). **Try again, please!**")
-                                except ValueError:
-                                    # traceback.print_exc()
-                                    logger.warning("Informing user about invalid argument (ValueError): " + arg)
-                                    await context.send("This is not something I can work with. Try again!")
-                            else:
-                                logger.info("No user reacted to message")
-                                await context.send("Whoops! No one was in the lobby! I cannot choose from 0 users!")
+                                                if treasure:
+                                                    msg += '\n**Your treasure:** ' + treasure
 
-                            break
+                                                try:
+                                                    await user.send(msg)
+                                                except discord.errors.Forbidden:
+                                                    logger.warning(
+                                                        "User does not allow DMs, informing context - " + printuser(
+                                                            user))
+                                                    await context.send("Oh no! <@" + str(
+                                                        user.id) + "> was chosen, but does not allow DMs from me. Help!")
+
+                                            logger.debug("Choosing done - editing info message")
+                                            await modmsg.edit(content="Done! => <#" + str(userchannel.id) + ">")
+                                        else:
+                                            logger.warning("Informing user as argument is out of allowed range: " + arg)
+                                            await context.send(
+                                                "Hey silly! I cannot choose from " + arg + " user(s). **Try again, please!**")
+                                    except ValueError:
+                                        logger.warning("Informing user about invalid argument (ValueError): " + arg)
+                                        await context.send("This is not something I can work with. Try again!")
+                                else:
+                                    logger.info("No user reacted to message")
+                                    await context.send("Whoops! No one was in the lobby! I cannot choose from 0 users!")
+
+                                break
+                    else:
+                        logger.warning(
+                            "Message to react to disappeared - choosing already ended or message was deleted, informing user")
+                        await context.send(
+                            "Choosing already done or my message to react to was deleted. Start a new round!")
                 else:
                     logger.info("No choosing active for server, informing user")
                     await context.send(
