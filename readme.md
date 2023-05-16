@@ -8,7 +8,6 @@ Get yourself an app at discord.com/developers.
 
 Then, go to OAuth2 -> URL Generator:
 * Scopes: bot
-* Bot permissions: Read Messages/View Channels
 
 Copy the generated link and visit it to join the bot to your server.
 
@@ -30,15 +29,15 @@ LogLevel=Warning
 ```
 
 ## Commands
-_The easiest way to obtain the IDs needed for these commands is to enable the developer mode in your Discord-App. You can then right-click a role or channel and select "Copy ID"._
-* `$setuserchannel <ChannelID>` - sets the channel where public messages will be posted
-* `$new` - starts a new round (users can add themselves to the lobby)
-* `$choose <HowMany>` - randomly selects `<HowMany>` users
-* `$settreasure "<Treasure>"` - if set, the selected users will receive this "treasure" via DM. Important! Don't forget the quotes "multiple words example"
-* `$setbenefit <RoleID> <NrOfBenefits>` - Sets the amount of additional chances for users of this role. Set to 0 to remove benefits from role.
-* `$listbenefits` - Lists the currently configured benefits
-* `$setmodrole <RoleID>` - Members of this role will be able to use the bot additionally to server-admins
-* `$getmodrole` - Shows you which role is currently set for using the bot additionally to server-admins
+_Since the introduction of slash-commands, the Discord-App will guide you through the required parameters._
+* `/setuserchannel <ChannelID>` - sets the channel where public messages will be posted
+* `/new` - starts a new round (users can add themselves to the lobby)
+* `/choose <HowMany>` - randomly selects `<HowMany>` users
+* `/settreasure <Treasure>` - if set, the selected users will receive this "treasure" via DM.
+* `/setbenefit <RoleID> <NrOfBenefits>` - Sets the amount of additional chances for users of this role. Set to 0 to remove benefits from role.
+* `/listbenefits` - Lists the currently configured benefits
+* `/setmodrole <RoleID>` - Members of this role will be able to use the bot additionally to server-admins
+* `/getmodrole` - Shows you which role is currently set for using the bot additionally to server-admins
 
 ## Benefit-feature
 Optionally, you can set a benefit for certain roles. This increases the chances of being chosen. Ideal for your VIPs or high-tier supporters (or yourself)...
@@ -52,10 +51,10 @@ Each of them has a 1/3 chance of being chosen.
 
 Now, some benefits are applied.
 ```
-$setbenefit 1107607121417228328 1   <- Tier 2 role
-$setbenefit 1107607058079031357 2   <- VIP role
+/setbenefit [@Tier 2] [1]
+$setbenefit [@VIP] [2]
 ```
-A tier 2 supporter has an additional chance and VIPs have two additonal chances of being chosen.
+A tier 2 supporter has an additional chance and VIPs have two additional chances of being chosen.
 ```
 [A, B, B, C, C, C]
 ```
@@ -69,9 +68,9 @@ Now C even has a 3/4 chance of being chosen. But always remember that there is n
 ## Example commands
 These can be used as a reference to get started. 
 ```
-$setuserchannel 1107722004704002158
-$settreasure https://example.com/join?id=j8HAzr3
-$new
+/setuserchannel @d1-public
+/settreasure https://example.com/join?id=j8HAzr3
+/new
 ...
-$choose 10
+/choose 10
 ```
