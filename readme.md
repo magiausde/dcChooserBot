@@ -63,12 +63,12 @@ The benefit stays as people get chosen (B in this case):
 ```
 [A, C, C, C]
 ```
-Now C even has a 3/4 chance of being chosen. But always remember that there is no guarantee of being chosen.
+Now C even has a 3/4 chance. But always remember that there is no guarantee of being chosen.
 
 ## Example commands
 These can be used as a reference to get started. 
 ```
-/setuserchannel @d1-public
+/setuserchannel #d1-public
 /settreasure https://example.com/join?id=j8HAzr3
 /new
 ...
