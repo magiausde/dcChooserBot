@@ -26,10 +26,10 @@ import traceback
 
 # Specific imports
 import discord
-from discord.ext import commands
+from discord import app_commands
 
 # version info
-VERSION_INFO = '2023-05-15a'
+VERSION_INFO = '2023-05-16a'
 
 # setup logging
 logger = logging.getLogger('dcChooserBot_main')
@@ -75,12 +75,11 @@ logger.debug("REQUIRE_TREASURE: " + str(REQUIRE_TREASURE))
 MULTIPLE_BENEFITS = cfg_main.getboolean('Global', 'MultipleBenefits')
 logger.debug("MULTIPLE_BENEFITS: " + str(MULTIPLE_BENEFITS))
 
-logger.debug("Starting bot")
+# Development settings
+# Get the development server ID, if existent
+DEV_GUILD_ID = cfg_main.getint("Dev", "DevGuildID", fallback=None)
 
-logger.debug("Preparing bot object")
-intents = discord.Intents.default()
-# we need access to guild messages, otherwise the bot won't get the message content
-intents.guild_messages = True
+logger.debug("Starting bot")
 
 # reference_new will contain the reference to a "new/react" message
 reference_new = -1
@@ -88,10 +87,32 @@ reference_new = -1
 # runtime_data stores all the settings and will be loaded from the filesystem (if available)
 runtime_data = {}
 
+
+class ChooserClient(discord.Client):
+    def __init__(self, *, intents: discord.Intents, status: discord.Status, activity):
+        super().__init__(intents=intents, status=status, activity=activity)
+        # Setup the command tree
+        self.tree = app_commands.CommandTree(self)
+
+    async def setup_hook(self):
+        # If DEV_GUILD_ID is set, we sync the command tree to that server.
+        # This makes development easier,
+        # as we do not have to wait up to an hour before the commands are synced globally.
+        if DEV_GUILD_ID:
+            logger.debug("A server for development purposes is set - syncing commands")
+            dev_guild = discord.Object(id=DEV_GUILD_ID)
+            self.tree.copy_global_to(guild=dev_guild)
+            await self.tree.sync(guild=dev_guild)
+        else:
+            logger.debug("Development server not set.")
+
+
+logger.debug("Preparing bot object")
+myIntents = discord.Intents.default()
+
 # Setup of the bot
-bot = commands.Bot(command_prefix=commands.when_mentioned_or("$"),
-                   description='Chooser Bot', status=discord.Status.dnd, intents=intents,
-                   activity=discord.Game(name="preferring people since 2023"))
+client = ChooserClient(intents=myIntents, status=discord.Status.dnd,
+                       activity=discord.Game(name="preferring people since 2023"))
 
 
 def save_runtime_data():
@@ -158,10 +179,10 @@ async def load_runtime_data():
     for server in runtime_data:
         for attrib in runtime_data[server]:
             if attrib == 'userchannel':
-                channel = await bot.fetch_channel(runtime_data[server][attrib])
+                channel = await client.fetch_channel(runtime_data[server][attrib])
                 runtime_data[server][attrib] = channel
             if attrib == 'modrole':
-                serverobject = bot.get_guild(server)
+                serverobject = client.get_guild(server)
                 modrole = discord.utils.get(serverobject.roles, id=runtime_data[server][attrib])
                 runtime_data[server][attrib] = modrole
 
@@ -226,15 +247,15 @@ def set_rolebenefit(serverid, roleid, benefit):
     save_runtime_data()
 
 
-def get_context_summary(context):
+def get_interaction_summary(interaction: discord.Interaction):
     """
-    Provides a context summary, mainly used by logging.
+    Provides a interaction summary, mainly used by logging.
     Summary consists of the user, guild/server name and channel name
-    :param context: Context object for which to get the summary for
-    :return: String with summary of context
+    :param interaction: interaction object for which to get the summary for
+    :return: String with summary of interaction
     """
     # Example - [RandomUser#1234@MyCoolServer/botcmnd]
-    return "[" + printuser(context.author) + "@" + context.guild.name + "/" + context.channel.name + "]"
+    return "[" + printuser(interaction.user) + "@" + interaction.guild.name + "/" + interaction.channel.name + "]"
 
 
 def printuser(user):
@@ -248,16 +269,16 @@ def printuser(user):
     return str(user) + " (" + str(user.id) + ")"
 
 
-def is_management_permitted(context):
+def is_management_permitted(interaction: discord.Interaction):
     """
-    Checks if a user (from context) is allowed to perform management-actions.
+    Checks if a user (from interaction) is allowed to perform management-actions.
     This is True if the user is a server administrator or modrole member.
-    :param context: Context to check
-    :return: if the user (from context) is allowed to perform management-actions
+    :param interaction: interaction to check
+    :return: if the user (from interaction) is allowed to perform management-actions
     """
-    logger.debug("Checking management permissions for user " + printuser(context.author))
-    imp = context.author.guild_permissions.administrator or (
-            get_runtime_data(context.guild.id, 'modrole') in context.guild.roles)
+    logger.debug("Checking management permissions for user " + printuser(interaction.user))
+    imp = interaction.user.guild_permissions.administrator or (
+            get_runtime_data(interaction.guild.id, 'modrole') in interaction.user.roles)
     logger.debug("Is permitted? " + str(imp))
     return imp
 
@@ -406,211 +427,226 @@ async def get_chosen_weighted(choose_list, amount, server):
     return chosen
 
 
-@bot.event
+@client.event
 async def on_ready():
     """
     Called when the Discord bot is ready.
     Will load saved runtime_data (if available).
     :return:
     """
-    logger.info(f'Logged on as {bot.user}!')
+    logger.info(f'Logged on as {client.user}!')
     # Now that the bot is ready, we can load runtime_data
     # this is a prerequisite as channel and role objects will be loaded
     await load_runtime_data()
     logger.debug("Ready! Startup completed.")
 
 
-@bot.command()
-async def new(context):
+@client.tree.command()
+async def new(interaction: discord.Interaction):
     """
-    Bot command to start a new choosing-round.
-    Posts a message to react to the public channel
-    :param context: Command context
-    :return: nothing
+    Start a new choosing-round.
+    Posts a message to react to the public channel.
     """
-    if is_management_permitted(context):
+    if is_management_permitted(interaction):
         global reference_new
-        logger.info('New lobby demanded ' + get_context_summary(context))
+        logger.info('New lobby demanded ' + get_interaction_summary(interaction))
 
-        userchannel = get_runtime_data(context.guild.id, 'userchannel')  # get the public/user channel for this server
+        userchannel = get_runtime_data(interaction.guild.id,
+                                       'userchannel')  # get the public/user channel for this server
         if userchannel:  # if the channel is set
             logger.debug("Everything okay. Sending message to react to userchannel")
             # send message to public channel and also react to make it more convenient for the users
             reference_new = await userchannel.send('Okay everyone! React with thumbs up if you would like to be added!')
             await reference_new.add_reaction('👍')
+            await interaction.response.send_message("Okay, message posted to <#" + str(userchannel.id) + ">")
 
             # reset treasure if wanted
             if RESET_TREASURE:
                 logger.debug("Resetting treasure as desired and informing user")
-                set_runtime_data(context.guild.id, 'treasure', None)
-                await context.send("_Cleared the treasure. Don't forget to set a new one._")
+                set_runtime_data(interaction.guild.id, 'treasure', None)
+                await interaction.send("_Cleared the treasure. Don't forget to set a new one._")
         else:  # public/user channel NOT set for this server
             logger.warning("Userchannel not set. Informing user")
-            await context.send("Channel for user messages not set yet. Will not continue! RTFM ;)")
+            await interaction.response.send_message("Channel for user messages not set yet. Will not continue! RTFM ;)")
+    else:
+        await interaction.response.send_message("You do not have permission to use this command, sorry!")
 
 
-@bot.command()
-async def settreasure(context, arg):
+@client.tree.command()
+@app_commands.describe(
+    treasure='Treasure to set (e.g. a link or code)'
+)
+async def settreasure(interaction: discord.Interaction, treasure: str):
     """
-    Bot command to set the treasure on a server.
-    :param context: Command context
-    :param arg: Treasure to set
-    :return: nothing
+    Set the treasure - Users will receive this via DM if they are chosen.
     """
-    if is_management_permitted(context):
-        logger.info('Setting new treasure ' + get_context_summary(context))
-        logger.debug("Argument: " + arg)
-        set_runtime_data(context.guild.id, 'treasure', arg)
-        await context.send("Okay! Treasure set to: " + arg)
+    if is_management_permitted(interaction):
+        logger.info('Setting new treasure ' + get_interaction_summary(interaction))
+        logger.debug("Argument: " + treasure)
+        set_runtime_data(interaction.guild.id, 'treasure', treasure)
+        await interaction.response.send_message("Okay! Treasure set to: " + treasure)
+    else:
+        await interaction.response.send_message("You do not have permission to use this command, sorry!")
 
 
-@bot.command()
-async def setuserchannel(context, arg):
+@client.tree.command()
+@app_commands.describe(
+    channel='ID of channel to set as the user channel'
+)
+async def setuserchannel(interaction: discord.Interaction, channel: discord.TextChannel):
     """
-    Bot command to set the public/user channel on a server.
-    :param context: Command context
-    :param arg: Channel id to set
-    :return: nothing
+    Set the public/user channel for this server.
     """
-    if is_management_permitted(context):
-        logger.info('Setting new userchannel ' + get_context_summary(context))
+    if is_management_permitted(interaction):
+        logger.info('Setting new userchannel ' + get_interaction_summary(interaction))
 
         try:
-            channel = await bot.fetch_channel(arg)  # get the channel object using the provided ID
-            set_runtime_data(context.guild.id, 'userchannel', channel)  # update runtime_data
+            set_runtime_data(interaction.guild.id, 'userchannel', channel)  # update runtime_data
             logger.debug("New user channel was set!")
-            await context.send("New user channel: " + channel.name)  # informing user
+            await interaction.response.send_message("New user channel: " + channel.name)  # informing user
         except:
             traceback.print_exc()
             logger.error("Something went wrong while setting new userchannel")
-            await context.send("Whoops! Something went wrong while setting a new channel for user messages!")
+            await interaction.response.send_message(
+                "Whoops! Something went wrong while setting a new channel for user messages!")
+    else:
+        await interaction.response.send_message("You do not have permission to use this command, sorry!")
 
 
-@bot.command()
-async def setmodrole(context, arg):
+@client.tree.command()
+@app_commands.describe(
+    modrole='ID of role to set as the moderator role'
+)
+async def setmodrole(interaction: discord.Interaction, modrole: discord.Role):
     """
-    Bot command to set the modrole on a server.
-    :param context: Command context
-    :param arg: Modrole id to set
-    :return: nothing
+    Set the modrole for your server. Members of the modrole are able to use ChooserBot.
     """
     # this can definitely only be done by an administrator
-    if context.author.guild_permissions.administrator:
-        logger.info('Setting new modrole ' + get_context_summary(context))
-        modrole = discord.utils.get(context.guild.roles, id=int(arg))  # get the role object using the provided ID
-        set_runtime_data(context.guild.id, 'modrole', modrole)  # update runtime_data
-        await getmodrole(context)  # list the currently configured roles
+    if interaction.user.guild_permissions.administrator:
+        logger.info('Setting new modrole ' + get_interaction_summary(interaction))
+        set_runtime_data(interaction.guild.id, 'modrole', modrole)  # update runtime_data
+        await interaction.response.send_message("Updated modrole. View the configured one with /getmodrole")
+    else:
+        await interaction.response.send_message("You do not have permission to use this command, sorry!")
 
 
-@bot.command()
-async def getmodrole(context):
+@client.tree.command()
+async def getmodrole(interaction: discord.Interaction):
     """
-    Bot command to get the modrole set on a server.
-    Result will be sent to the context (message will be posted).
-    :param context: Command context
-    :return: nothing
+    Shows you the currently configured modrole.
     """
-    if is_management_permitted(context):
-        logger.debug('Modrole requested ' + get_context_summary(context))
-        modrole = get_runtime_data(context.guild.id, 'modrole')  # get the role for this server from runtime_data
+    if is_management_permitted(interaction):
+        logger.debug('Modrole requested ' + get_interaction_summary(interaction))
+        modrole = get_runtime_data(interaction.guild.id, 'modrole')  # get the role for this server from runtime_data
         if modrole:  # if a modrole is set for this server
             logger.debug("Modrole is set, id: " + str(modrole.id))
-            await context.send("Current modrole: " + modrole.name + "\nAdministrators are always able to use me, too.")
+            await interaction.response.send_message(
+                "Current modrole: " + modrole.name + "\nAdministrators are always able to use me, too.")
         else:  # if a modrole is NOT set for this server
             logger.debug("Modrole is NOT set")
-            await context.send("Currently no modrole is set.\nAdministrators are always able to use me.")
+            await interaction.response.send_message(
+                "Currently no modrole is set.\nAdministrators are always able to use me.")
+    else:
+        await interaction.response.send_message("You do not have permission to use this command, sorry!")
 
 
-@bot.command()
-async def setbenefit(context, raw_roleid, raw_benefit):
+@client.tree.command()
+@app_commands.rename(
+    benefitrole='role'
+)
+@app_commands.describe(
+    benefitrole='Role to set the benefit for',
+    benefit='Benefit value'
+)
+async def setbenefit(interaction: discord.Interaction, benefitrole: discord.Role, benefit: int):
     """
-    Bot command to set a benefit for a role on a server.
-    :param context: Command context
-    :param raw_roleid: Role id where the benefit will be apllied to
-    :param raw_benefit: The benefit value
-    :return: nothing
+    Set the benefit for a role. Set to 0 to remove.
     """
-    if is_management_permitted(context):
-        logger.debug('User setting benefit ' + get_context_summary(context))
+    if is_management_permitted(interaction):
+        logger.debug('User setting benefit ' + get_interaction_summary(interaction))
 
         # benefit must be greater than zero and a valid integer
         try:
-            roleid = int(raw_roleid)  # string to integer (could cause exception in this try-block)
-            benefit = int(raw_benefit)  # string to integer (could cause exception in this try-block)
-            if (roleid > 0) and (benefit > -1):  # must be valid role id and useful benefit
+            if benefit > -1:  # must be valid role id and useful benefit
                 # first of all check, if the role exists
-                role = context.guild.get_role(roleid)
 
-                if role:  # role exists
+                if benefitrole:  # role exists
+                    logger.debug('Everything okay, passing data to internal save method')
+                    set_rolebenefit(interaction.guild.id, benefitrole.id, benefit)
+
                     if benefit > 99:  # very high benefit, might impact performance with lots of people
                         logger.warning("User set benefit > 99, informing about possible performance impact")
-                        await context.send(
-                            "**Please note that benefits over 100 are not recommended because of performance reasons!**")
-
-                    logger.debug('Everything okay, passing data to internal save method')
-                    set_rolebenefit(context.guild.id, roleid, benefit)
-                    await listbenefits(context)
+                        await interaction.response.send_message(
+                            "**Please note that benefits over 100 are not recommended because of performance "
+                            "reasons!**\nUpdated benefit. View all benefits with /listbenefits")
+                    else:
+                        await interaction.response.send_message("Updated benefit. View all benefits with /listbenefits")
                 else:  # role does not exist on this server
                     logger.warning("User passed an invalid role, informing")
-                    await context.send("The role you entered does not exist on this server!")
+                    await interaction.response.send_message("The role you entered does not exist on this server!")
             else:  # invalid arguments provided
                 logger.warning("User passed invalid integer, informing user")
-                await context.send(
+                await interaction.response.send_message(
                     "Please check you entered valid values for the role id and the benefit!")
         except ValueError:  # usually when raw_roleid or raw_benefit weren't integers
             logger.warning("User passed invalid argument (ValueError), informing user")
-            await context.send("Whoops! Something went wrong. Did you pass valid numbers to me?")
+            await interaction.response.send_message("Whoops! Something went wrong. Did you pass valid numbers to me?")
+    else:
+        await interaction.response.send_message("You do not have permission to use this command, sorry!")
 
 
-@bot.command()
-async def listbenefits(context):
+@client.tree.command()
+async def listbenefits(interaction: discord.Interaction):
     """
-    Bot command to get the benefits set on a server.
-    Result will be sent to the context (message will be posted).
-    :param context: Command context
-    :return: nothing
+    List the benefits on this server
     """
-    if is_management_permitted(context):
-        benefitroles = get_runtime_data(context.guild.id, 'rolebenefits')  # get benefit roles for this server
+    if is_management_permitted(interaction):
+        benefitroles = get_runtime_data(interaction.guild.id, 'rolebenefits')  # get benefit roles for this server
 
-        summary = "These are the benefits currently configured for " + str(context.guild) + ":"
+        summary = "These are the benefits currently configured for " + str(interaction.guild) + ":"
         if benefitroles:  # if benefit roles are set for this server
             for benefitroleid in benefitroles:  # for every role that has a benefit set
-                benefit_role = discord.utils.get(context.guild.roles, id=benefitroleid)  # get the role
+                benefit_role = discord.utils.get(interaction.guild.roles, id=benefitroleid)  # get the role
                 summary += "\n- " + str(benefit_role) + ": " + str(benefitroles[benefitroleid])  # add benefit info
         else:  # server has NO benefit roles set
             summary += '\n- None configured!'
 
-        # send summary to user/context
-        await context.send(summary)
+        # send summary to user/interaction
+        await interaction.response.send_message(summary)
+    else:
+        await interaction.response.send_message("You do not have permission to use this command, sorry!")
 
 
-@bot.command()
-async def choose(context, arg):
+@client.tree.command()
+@app_commands.describe(
+    amount='How many users to choose'
+)
+async def choose(interaction: discord.Interaction, amount: int):
     """
-    Bot command to start the choosing.
-    Takes care of all relevant choosing parts, like getting a list of chosen users and also informing them.
-    Also checks for some requirements.
-    :param context: Command context
-    :param arg: How many to choose
-    :return: nothing
+    Choose a specified amount of users.
     """
-    if is_management_permitted(context):
-        logger.info('Choosing demanded ' + get_context_summary(context))
+    # Bot command to start the choosing.
+    # Takes care of all relevant choosing parts, like getting a list of chosen users and also informing them.
+    # Also checks for some requirements.
 
-        treasure = get_runtime_data(context.guild.id, 'treasure')  # get treasure set for this server
+    if is_management_permitted(interaction):
+        logger.info('Choosing demanded ' + get_interaction_summary(interaction))
+
+        treasure = get_runtime_data(interaction.guild.id, 'treasure')  # get treasure set for this server
         if REQUIRE_TREASURE and (not treasure):  # if setting TreasureRequiredForChoosing = 1, but none set yet
             logger.warning("Required treasure not set, informing user")
-            await context.send("I will not choose! The required treasure is not set! Do this first.")
+            await interaction.response.send_message(
+                "I will not choose! The required treasure is not set! Do this first.")
         else:  # treasure set or not required
-            if not arg:  # if command misses argument how many users to choose
+            if not amount:  # if command misses argument how many users to choose
                 logger.warning("Argument not present, informing user")
-                await context.send("Okay I would choose, but I don't know **how many** to choose. Try again!")
+                await interaction.response.send_message(
+                    "Okay I would choose, but I don't know **how many** to choose. Try again!")
             else:  # user told us how many to choose
                 if type(reference_new) == discord.message.Message:  # if reference is valid
                     # we have to get the cached message, otherwise it appears as no one had reacted to it
                     logger.debug("Getting the up-to-date message users had to react to")
-                    cached_reference_new = discord.utils.get(bot.cached_messages, id=reference_new.id)
+                    cached_reference_new = discord.utils.get(client.cached_messages, id=reference_new.id)
 
                     if cached_reference_new:  # if the cached message could be retrieved
                         reference_reactions = cached_reference_new.reactions  # get the reactions to the message
@@ -621,7 +657,7 @@ async def choose(context, arg):
                                 # convert the result of reaction.users() to a list we can work with
                                 # caution! we get User objects here, not Members!
                                 thumbsup_users = [user async for user in reaction.users()]
-                                thumbsup_users.remove(bot.user)
+                                thumbsup_users.remove(client.user)
 
                                 lobby_users_amount = len(thumbsup_users)  # how many users reacted with thumbs up
                                 if lobby_users_amount > 0:  # if users reacted at all
@@ -629,15 +665,16 @@ async def choose(context, arg):
                                         [printuser(user) for user in thumbsup_users]))
 
                                     try:
-                                        arg_int = int(arg)  # how many users to choose - try converting it to int
+                                        arg_int = int(amount)  # how many users to choose - try converting it to int
 
                                         if arg_int > 0:  # check if at least one user should be chosen
-                                            logger.debug("Sending info message to context")
-                                            modmsg = await context.send(
+                                            logger.debug("Sending info message to interaction")
+                                            await interaction.response.send_message(
                                                 "Choosing and informing " + str(arg_int) + " user(s). Please wait...")
 
                                             # use the choosing function to select the users
-                                            chosen = await get_chosen_weighted(thumbsup_users, arg_int, context.guild)
+                                            chosen = await get_chosen_weighted(thumbsup_users, arg_int,
+                                                                               interaction.guild)
 
                                             # delete the encouraging message
                                             logger.debug("Deleting message to react to")
@@ -645,7 +682,7 @@ async def choose(context, arg):
 
                                             logger.debug("Informing users about the chosen ones")
                                             # post result to the public chanel
-                                            userchannel = get_runtime_data(context.guild.id, 'userchannel')
+                                            userchannel = get_runtime_data(interaction.guild.id, 'userchannel')
                                             await userchannel.send(
                                                 "Alright... So who's it gonna be?\n**I choose you:**\n- <@" + "\n- <@".join(
                                                     [str(user.id) + ">" for user in chosen]))
@@ -662,48 +699,54 @@ async def choose(context, arg):
                                                     await user.send(msg)
                                                 except discord.errors.Forbidden:
                                                     logger.warning(
-                                                        "User does not allow DMs, informing context - " + printuser(
+                                                        "User does not allow DMs, informing interaction - " + printuser(
                                                             user))
-                                                    await context.send("Oh no! <@" + str(
+                                                    await interaction.response.send_message("Oh no! <@" + str(
                                                         user.id) + "> was chosen, but does not allow DMs from me. Help!")
 
                                             logger.debug("Choosing done - editing info message")
-                                            await modmsg.edit(content="Done! => <#" + str(userchannel.id) + ">")
+                                            await interaction.edit_original_response(
+                                                content="Done! 🡺 <#" + str(userchannel.id) + ">")
                                         else:  # user told us to choose zero or fewer people - senseless!
-                                            logger.warning("Informing user as argument is out of allowed range: " + arg)
-                                            await context.send(
-                                                "Hey silly! I cannot choose from " + arg + " user(s). **Try again, please!**")
+                                            logger.warning(
+                                                "Informing user as argument is out of allowed range: " + str(amount))
+                                            await interaction.response.send_message(
+                                                "Hey silly! I cannot choose from " + str(
+                                                    amount) + " user(s). **Try again, please!**")
                                     except ValueError:  # "how many users to choose" was not a valid integer
-                                        logger.warning("Informing user about invalid argument (ValueError): " + arg)
-                                        await context.send("This is not something I can work with. Try again!")
+                                        logger.warning(
+                                            "Informing user about invalid argument (ValueError): " + str(amount))
+                                        await interaction.response.send_message(
+                                            "This is not something I can work with. Try again!")
                                 else:  # no users reacted to the message
                                     logger.info("No user reacted to message")
-                                    await context.send("Whoops! No one was in the lobby! I cannot choose from 0 users!")
+                                    await interaction.response.send_message(
+                                        "Whoops! No one was in the lobby! I cannot choose from 0 users!")
 
                                 # since we "found" the "thumbs up" reaction, we do not need to look any further. break.
                                 break
                     else:  # reference message was not found - probably it was deleted
                         logger.warning(
                             "Message to react to disappeared - choosing already ended or message was deleted, informing user")
-                        await context.send(
+                        await interaction.response.send_message(
                             "Choosing already done or my message to react to was deleted. Start a new round!")
                 else:  # no round active
                     logger.info("No choosing active for server, informing user")
-                    await context.send(
-                        "Hey silly! You can't choose if you didn't even start yet! => try the `new` command!")
+                    await interaction.response.send_message(
+                        "Hey silly! You can't choose if you didn't even start yet! 🡺 try the `/new` command!")
+    else:
+        await interaction.response.send_message("You do not have permission to use this command, sorry!")
 
 
-@bot.command()
-async def version(context):
+@client.tree.command()
+async def version(interaction: discord.Interaction):
     """
-    Bot command to get the bot version.
-    Result will be sent to the context (message will be posted).
-    :param context: Command context
-    :return: nothing
+    Shows the current version of ChooserBot you are using.
     """
-    await context.send(
+    await interaction.response.send_message(
         "**This is dcChooserBot, version " + VERSION_INFO +
         "**\nI am an open source project, initiated by magiausde! Find me at https://github.com/magiausde/dcChooserBot")
 
+
 # start the bot!
-bot.run(MY_TOKEN)
+client.run(MY_TOKEN)
