@@ -29,7 +29,7 @@ import discord
 from discord import app_commands
 
 # version info
-VERSION_INFO = '2023-05-16a'
+VERSION_INFO = '2023-05-17a'
 
 # setup logging
 logger = logging.getLogger('dcChooserBot_main')
@@ -454,17 +454,18 @@ async def new(interaction: discord.Interaction):
         userchannel = get_runtime_data(interaction.guild.id,
                                        'userchannel')  # get the public/user channel for this server
         if userchannel:  # if the channel is set
+            # reset treasure if wanted
+            additional = ""
+            if RESET_TREASURE:
+                logger.debug("Resetting treasure as desired and informing user")
+                set_runtime_data(interaction.guild.id, 'treasure', None)
+                additional = "\n_Cleared the treasure. Don't forget to set a new one._"
+
             logger.debug("Everything okay. Sending message to react to userchannel")
             # send message to public channel and also react to make it more convenient for the users
             reference_new = await userchannel.send('Okay everyone! React with thumbs up if you would like to be added!')
             await reference_new.add_reaction('👍')
-            await interaction.response.send_message("Okay, message posted to <#" + str(userchannel.id) + ">")
-
-            # reset treasure if wanted
-            if RESET_TREASURE:
-                logger.debug("Resetting treasure as desired and informing user")
-                set_runtime_data(interaction.guild.id, 'treasure', None)
-                await interaction.send("_Cleared the treasure. Don't forget to set a new one._")
+            await interaction.response.send_message("Okay, message posted to <#" + str(userchannel.id) + ">" + additional)
         else:  # public/user channel NOT set for this server
             logger.warning("Userchannel not set. Informing user")
             await interaction.response.send_message("Channel for user messages not set yet. Will not continue! RTFM ;)")
@@ -701,7 +702,7 @@ async def choose(interaction: discord.Interaction, amount: int):
                                                     logger.warning(
                                                         "User does not allow DMs, informing interaction - " + printuser(
                                                             user))
-                                                    await interaction.response.send_message("Oh no! <@" + str(
+                                                    await interaction.channel.send("Oh no! <@" + str(
                                                         user.id) + "> was chosen, but does not allow DMs from me. Help!")
 
                                             logger.debug("Choosing done - editing info message")
