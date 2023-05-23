@@ -75,10 +75,6 @@ logger.debug("REQUIRE_TREASURE: " + str(REQUIRE_TREASURE))
 MULTIPLE_BENEFITS = cfg_main.getboolean('Global', 'MultipleBenefits')
 logger.debug("MULTIPLE_BENEFITS: " + str(MULTIPLE_BENEFITS))
 
-# Development settings
-# Get the development server ID, if existent
-DEV_GUILD_ID = cfg_main.getint("Dev", "DevGuildID", fallback=None)
-
 logger.debug("Starting bot")
 
 # runtime_data stores all the settings and will be loaded from the filesystem (if available)
@@ -92,18 +88,6 @@ class ChooserClient(discord.Client):
         super().__init__(intents=intents, status=status, activity=activity)
         # Setup the command tree
         self.tree = app_commands.CommandTree(self)
-
-    async def setup_hook(self):
-        # If DEV_GUILD_ID is set, we sync the command tree to that server.
-        # This makes development easier,
-        # as we do not have to wait up to an hour before the commands are synced globally.
-        if DEV_GUILD_ID:
-            logger.debug("A server for development purposes is set - syncing commands")
-            dev_guild = discord.Object(id=DEV_GUILD_ID)
-            self.tree.copy_global_to(guild=dev_guild)
-            await self.tree.sync(guild=dev_guild)
-        else:
-            logger.debug("Development server not set.")
 
 
 logger.debug("Preparing bot object")
@@ -455,6 +439,13 @@ async def on_ready():
     :return:
     """
     logger.info(f'Logged on as {client.user}!')
+
+    # Copy the command tree to all servers we are a member of
+    for guild in client.guilds:
+        logger.debug("Syncing command tree to server: " + guild.name)
+        client.tree.copy_global_to(guild=guild)
+        await client.tree.sync(guild=guild)
+
     # Now that the bot is ready, we can load runtime_data
     # this is a prerequisite as channel and role objects will be loaded
     await load_runtime_data()
@@ -783,6 +774,16 @@ async def on_message(message):
             msg += dm_backlog[message.author.id]
             await message.channel.send(msg)
             dm_backlog.pop(message.author.id)
+
+
+@client.event
+async def on_guild_join(guild):
+    """
+    When the bot is joined to a server, copy over the commands so they can be used immediately.
+    """
+    logger.debug("Bot was joined to new Guild: " + guild.name)
+    client.tree.copy_global_to(guild=guild)
+    await client.tree.sync(guild=guild)
 
 
 @client.tree.command()
