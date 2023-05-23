@@ -29,7 +29,7 @@ import discord
 from discord import app_commands
 
 # version info
-VERSION_INFO = '2023-05-17a'
+VERSION_INFO = '2023-05-23a'
 
 # setup logging
 logger = logging.getLogger('dcChooserBot_main')
@@ -81,9 +81,6 @@ DEV_GUILD_ID = cfg_main.getint("Dev", "DevGuildID", fallback=None)
 
 logger.debug("Starting bot")
 
-# reference_new will contain the reference to a "new/react" message
-reference_new = -1
-
 # runtime_data stores all the settings and will be loaded from the filesystem (if available)
 runtime_data = {}
 
@@ -127,6 +124,7 @@ def save_runtime_data():
     # These will contain objects. For saving to the filesystem they get converted to IDs later
     original_channels = {}
     original_roles = {}
+    original_references = {}
 
     # first of all, remove all empty/none attributes
     for server in runtime_data:
@@ -147,6 +145,9 @@ def save_runtime_data():
             if attrib == 'modrole':
                 original_roles[server] = value
                 runtime_data[server][attrib] = value.id
+            if attrib == 'reference_new':
+                original_references[server] = value
+                runtime_data[server][attrib] = value.id
 
     # save runtime data to the filesystem
     with open('runtimedata.pkl', 'wb+') as f:
@@ -159,6 +160,10 @@ def save_runtime_data():
     # restore the real roles
     for server in original_roles:
         runtime_data[server]['modrole'] = original_roles[server]
+
+    # restore the real references
+    for server in original_roles:
+        runtime_data[server]['reference_new'] = original_references[server]
 
 
 async def load_runtime_data():
@@ -177,15 +182,28 @@ async def load_runtime_data():
     # workaround for pickle that cannot save weakref objects (channel object)
     # turn IDs into the corresponding objects
     for server in runtime_data:
-        for attrib in runtime_data[server]:
-            if attrib == 'userchannel':
-                channel = await client.fetch_channel(runtime_data[server][attrib])
-                runtime_data[server][attrib] = channel
-            if attrib == 'modrole':
-                serverobject = client.get_guild(server)
-                modrole = discord.utils.get(serverobject.roles, id=runtime_data[server][attrib])
-                runtime_data[server][attrib] = modrole
-
+        if "userchannel" in runtime_data[server]:
+            channel = await client.fetch_channel(runtime_data[server]["userchannel"])
+            if channel:
+                logger.debug("Userchannel fetched successfully!")
+            else:
+                logger.warning("Userchannel failed to fetch!")
+            runtime_data[server]["userchannel"] = channel
+        if "modrole" in runtime_data[server]:
+            serverobject = client.get_guild(server)
+            modrole = discord.utils.get(serverobject.roles, id=runtime_data[server]["modrole"])
+            if modrole:
+                logger.debug("Modrole fetched successfully!")
+            else:
+                logger.warning("Modrole failed to fetch!")
+            runtime_data[server]["modrole"] = modrole
+        if "reference_new" in runtime_data[server] and channel:
+            messageobject = await channel.fetch_message(runtime_data[server]["reference_new"])
+            if messageobject:
+                logger.debug("Reference fetched successfully!")
+            else:
+                logger.warning("Reference failed to fetch!")
+            runtime_data[server]["reference_new"] = messageobject
 
 def set_runtime_data(serverid, key, value):
     """
@@ -466,6 +484,7 @@ async def new(interaction: discord.Interaction):
             reference_new = await userchannel.send('Okay everyone! React with thumbs up if you would like to be added!')
             await reference_new.add_reaction('👍')
             await interaction.response.send_message("Okay, message posted to <#" + str(userchannel.id) + ">" + additional)
+            set_runtime_data(interaction.guild.id, "reference_new", reference_new)
         else:  # public/user channel NOT set for this server
             logger.warning("Userchannel not set. Informing user")
             await interaction.response.send_message("Channel for user messages not set yet. Will not continue! RTFM ;)")
@@ -644,10 +663,15 @@ async def choose(interaction: discord.Interaction, amount: int):
                 await interaction.response.send_message(
                     "Okay I would choose, but I don't know **how many** to choose. Try again!")
             else:  # user told us how many to choose
+                reference_new = get_runtime_data(interaction.guild.id, "reference_new")
                 if type(reference_new) == discord.message.Message:  # if reference is valid
                     # we have to get the cached message, otherwise it appears as no one had reacted to it
                     logger.debug("Getting the up-to-date message users had to react to")
                     cached_reference_new = discord.utils.get(client.cached_messages, id=reference_new.id)
+                    # fallback if no cache available (e.g. restart of bot)
+                    if not cached_reference_new:
+                        logger.debug("Cached message not available, fetching")
+                        cached_reference_new = await reference_new.channel.fetch_message(reference_new.id)
 
                     if cached_reference_new:  # if the cached message could be retrieved
                         reference_reactions = cached_reference_new.reactions  # get the reactions to the message
