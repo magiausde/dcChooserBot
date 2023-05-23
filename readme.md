@@ -2,7 +2,10 @@
 Selects a specified amount of people from a pool.
 Optionally sends them a message (e.g. a join link). Can be configured to give priority to certain roles (e.g. subscribers, VIPs).
 
-## Setup
+## I just want to use/try it!
+Sure, no problem. You can use [this link](https://discord.com/api/oauth2/authorize?client_id=1106264233240440882&permissions=0&scope=bot) to join the bot hosted by the development team to your server.
+
+## Setup (Self hosted)
 ### Set up the bot itself
 Get yourself an app at discord.com/developers.
 
