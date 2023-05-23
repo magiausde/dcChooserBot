@@ -83,6 +83,8 @@ logger.debug("Starting bot")
 
 # runtime_data stores all the settings and will be loaded from the filesystem (if available)
 runtime_data = {}
+# if a user does not allow bot messages initially, these will be sent when the user messages the bot once via DM
+dm_backlog = {}
 
 
 class ChooserClient(discord.Client):
@@ -726,8 +728,14 @@ async def choose(interaction: discord.Interaction, amount: int):
                                                     logger.warning(
                                                         "User does not allow DMs, informing interaction - " + printuser(
                                                             user))
-                                                    await interaction.channel.send("Oh no! <@" + str(
-                                                        user.id) + "> was chosen, but does not allow DMs from me. Help!")
+                                                    dm_backlog[user.id] = msg
+                                                    await userchannel.send(
+                                                        "<@" + str(user.id) + "> I am not allowed to send you a "
+                                                                              "message (Right click on the server "
+                                                                              "icon -> Privacy -> \"Direct messages\" "
+                                                                              "is not enabled). If you enable it (at "
+                                                                              "least for a short time) and send me a "
+                                                                              "DM, I will inform you, too.")
 
                                             logger.debug("Choosing done - editing info message")
                                             await interaction.edit_original_response(
@@ -761,6 +769,20 @@ async def choose(interaction: discord.Interaction, amount: int):
                         "Hey silly! You can't choose if you didn't even start yet! 🡺 try the `/new` command!")
     else:
         await interaction.response.send_message("You do not have permission to use this command, sorry!")
+
+
+@client.event
+async def on_message(message):
+    """
+    Reacts to user messages.
+    This is to take care if someone did not allow bot messages initially.
+    """
+    if not message.guild:
+        if message.author.id in dm_backlog:
+            msg = "Thanks! If you want to, feel free to disable DMs for the server again.\n\n"
+            msg += dm_backlog[message.author.id]
+            await message.channel.send(msg)
+            dm_backlog.pop(message.author.id)
 
 
 @client.tree.command()
